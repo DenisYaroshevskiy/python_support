@@ -9,17 +9,24 @@ class DayInfo:
     self.win = win
     self.threshold = threshold
 
-class Instrument:
-  def __init__(self, init_price, price_diffs_generator, days_info):
+class Asset:
+  def __init__(self, init_price, price_diffs_generator):
     self._init_price = init_price
     self._price_diffs_generator = price_diffs_generator
-    self._days_info = days_info
 
   def get_init_price(self):
     return self._init_price
 
   def get_price_diff(self):
     return next(self._price_diffs_generator)
+
+class Instrument:
+  def __init__(self, asset, days_info):
+    self._asset = asset
+    self._days_info = days_info
+
+  def get_asset(self):
+    return self._asset
 
   def win_for_day(self, cur_price, day_num):
     if cur_price < self._days_info[day_num].threshold:
@@ -29,10 +36,10 @@ class Instrument:
 class InstrumentSim:
   def __init__(self, instrument):
     self._instrument = instrument
-    self._cur_price  = instrument.get_init_price()
+    self._cur_price  = instrument.get_asset().get_init_price()
 
   def adjust_price(self):
-    self._cur_price += self._instrument.get_price_diff()
+    self._cur_price += self._instrument.get_asset().get_price_diff()
 
   def get_win_for_day(self, day_num):
     return self._instrument.win_for_day(self._cur_price, day_num)
@@ -66,14 +73,17 @@ def constant_price_diff(diff):
 
 def increasing_instrument(win):
   init_price = 100
+  asset = Asset(init_price, constant_price_diff(1))
   days_info = [ DayInfo(win, init_price - 1) for d in range(1000)]  # we can do more days
-  return Instrument( init_price, constant_price_diff(1), days_info )
+  return Instrument( asset, days_info )
 
 def decreasing_instrument(days_till_stop, win):
   threshold = 10
   init_price = days_till_stop + threshold - 1
+  asset = Asset(init_price, constant_price_diff(-1))
+
   days_info = [ DayInfo(win, threshold) for d in range(1000)]
-  return Instrument( init_price, constant_price_diff(-1), days_info )
+  return Instrument( asset, days_info )
 
 def test_process_day():
   # only increasing ==============
@@ -98,12 +108,20 @@ def test_process_day():
                             decreasing_instrument(days_till_stop = 7, win = 2)],
                             days_count = 10)
 
+def somewhat_real():
+  asset_1 = Asset(10, price_diff_generator([-1, 0, 1]))
+  asset_2 = Asset(5, price_diff_generator([-1, 0, 1, 2]))
+  instrument_1 = Instrument(asset_1, days_info=[ DayInfo(1, threshold = d / 2) for d in range(100) ] )
+  instrument_2 = Instrument(asset_2, days_info=[ DayInfo(0.5, threshold = d) for d in range(100) ] )
+
+  print(one_attempt([instrument_1, instrument_2], 30))
 
 def tests():
   test_process_day()
 
 def main():
   tests()
+  somewhat_real()
 
 if __name__ == '__main__':
   main()
