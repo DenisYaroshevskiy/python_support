@@ -53,11 +53,13 @@ def one_attempt(contract, assets, days_count):
   asset_sims = [ AssetSim(asset) for asset in assets ]
 
   for day in range(days_count):
+
     for asset_sim in asset_sims:
       expected_price = contract.get_expected_price(asset_sim.get_asset(), day)
       if asset_sim.get_cur_price() < expected_price:
         return total_win
       asset_sim.adjust_price()
+
     total_win += contract.get_win(day)
 
   return total_win
@@ -68,12 +70,6 @@ def one_attempt(contract, assets, days_count):
 def constant_price_diff(diff):
   while True:
     yield diff
-
-def increasing_asset():
-  return Asset(100, constant_price_diff(1))
-
-def decreasing_asset():
-  return Asset(100, constant_price_diff(-1))
 
 def test_process_day():
   # 1 first 3 days, After 3, if increases by 10% - 2  ==============
