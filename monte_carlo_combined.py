@@ -4,11 +4,6 @@ def price_diff_generator(price_daily_diffs):
   while True:
     yield random.choice(price_daily_diffs)
 
-class DayInfo:
-  def __init__(self, win, threshold):
-    self.win = win
-    self.threshold = threshold
-
 class Asset:
   def __init__(self, init_price, price_diffs_generator):
     self._init_price = init_price
@@ -17,50 +12,53 @@ class Asset:
   def get_init_price(self):
     return self._init_price
 
-  def get_price_diff(self):
-    return next(self._price_diffs_generator)
+  def get_next_price(self, cur_price):
+    return cur_price + next(self._price_diffs_generator)
 
-class Instrument:
-  def __init__(self, asset, days_info):
+class AssetSim:
+  def __init__(self, asset):
     self._asset = asset
-    self._days_info = days_info
+    self._cur_price = asset.get_init_price()
+
+  def adjust_price(self):
+    self._cur_price = self._asset.get_next_price(self._cur_price)
 
   def get_asset(self):
     return self._asset
 
-  def win_for_day(self, cur_price, day_num):
-    if cur_price < self._days_info[day_num].threshold:
-      return None
-    return self._days_info[day_num].win
+  def get_cur_price(self):
+    return self._cur_price
 
-class InstrumentSim:
-  def __init__(self, instrument):
-    self._instrument = instrument
-    self._cur_price  = instrument.get_asset().get_init_price()
+class DayInfo:
+  def __init__(self, win, increase):
+    ''' win - fixed, increase - percentage from init price '''
+    self.win = win
+    self.increase = increase
 
-  def adjust_price(self):
-    self._cur_price += self._instrument.get_asset().get_price_diff()
+class Contract:
+  def __init__(self, schedule):
+    ''' schedule - list of DayInfo '''
+    self._schedule = schedule
 
-  def get_win_for_day(self, day_num):
-    return self._instrument.win_for_day(self._cur_price, day_num)
+  def get_expected_price(self, asset, day_num):
+    return asset.get_init_price() * self._schedule[day_num].increase
 
-def one_attempt(instruments, days_count):
+  def get_win(self, day_num):
+    return self._schedule[day_num].win
+
+
+def one_attempt(contract, assets, days_count):
   total_win = 0
 
-  runs = [ InstrumentSim(instrument) for instrument in instruments ]
+  asset_sims = [ AssetSim(asset) for asset in assets ]
 
   for day in range(days_count):
-    todays_win = 0
-
-    for run in runs:
-      cur_win = run.get_win_for_day(day)
-      if not cur_win:
+    for asset_sim in asset_sims:
+      expected_price = contract.get_expected_price(asset_sim.get_asset(), day)
+      if asset_sim.get_cur_price() < expected_price:
         return total_win
-
-      todays_win += cur_win
-      run.adjust_price()
-
-    total_win += todays_win
+      asset_sim.adjust_price()
+    total_win += contract.get_win(day)
 
   return total_win
 
@@ -71,50 +69,39 @@ def constant_price_diff(diff):
   while True:
     yield diff
 
-def increasing_instrument(win):
-  init_price = 100
-  asset = Asset(init_price, constant_price_diff(1))
-  days_info = [ DayInfo(win, init_price - 1) for d in range(1000)]  # we can do more days
-  return Instrument( asset, days_info )
+def increasing_asset():
+  return Asset(100, constant_price_diff(1))
 
-def decreasing_instrument(days_till_stop, win):
-  threshold = 10
-  init_price = days_till_stop + threshold - 1
-  asset = Asset(init_price, constant_price_diff(-1))
-
-  days_info = [ DayInfo(win, threshold) for d in range(1000)]
-  return Instrument( asset, days_info )
+def decreasing_asset():
+  return Asset(100, constant_price_diff(-1))
 
 def test_process_day():
-  # only increasing ==============
-  assert 10 == one_attempt([increasing_instrument(win = 1)], days_count = 10)
+  # 1 first 3 days, After 3, if increases by 10% - 2  ==============
+  expected_10_after_5 = Contract(
+    [DayInfo(1, 1.0), DayInfo(1, 1.0), DayInfo(1, 1.0),
+     DayInfo(2, 1.1), DayInfo(2, 1.1), DayInfo(2, 1.1)])
 
-  assert 30 == one_attempt([increasing_instrument(win = 1),
-                            increasing_instrument(win = 2)],
-                            days_count = 10)
+  do_nothing_asset     = Asset(100, constant_price_diff(0))
+  increase_fast_enough = Asset(100, constant_price_diff(20))
 
+  # untill threshold
+  assert 2 == one_attempt(expected_10_after_5, [do_nothing_asset], 2)  # before expected increase
+  assert 3 == one_attempt(expected_10_after_5, [do_nothing_asset], 3)  # on     expected increase
+  assert 3 == one_attempt(expected_10_after_5, [do_nothing_asset], 4)  # after  expected increase
 
-  # only decreasing =============
-  assert 5 == one_attempt([decreasing_instrument(days_till_stop = 5, win = 1)],
-                          days_count = 10)
+  assert 3 == one_attempt(expected_10_after_5, [do_nothing_asset, increase_fast_enough], 4)  # after  expected increase
 
-  ### decreasing instrument, 5 days till stop 1st, 2 days for second , 10 days
-  assert 6 == one_attempt([decreasing_instrument(days_till_stop = 5, win = 2),
-                           decreasing_instrument(days_till_stop = 2, win = 1)],
-                           days_count = 10)
-
-  ### increasing, decreasing
-  assert 21 == one_attempt([increasing_instrument(win = 1),
-                            decreasing_instrument(days_till_stop = 7, win = 2)],
-                            days_count = 10)
+  # passed the threshold
+  assert 5 == one_attempt(expected_10_after_5, [increase_fast_enough], 4)
+  assert 7 == one_attempt(expected_10_after_5, [increase_fast_enough, increase_fast_enough], 5)
 
 def somewhat_real():
-  asset_1 = Asset(10, price_diff_generator([-1, 0, 1]))
-  asset_2 = Asset(5, price_diff_generator([-1, 0, 1, 2]))
-  instrument_1 = Instrument(asset_1, days_info=[ DayInfo(1, threshold = d / 2) for d in range(100) ] )
-  instrument_2 = Instrument(asset_2, days_info=[ DayInfo(0.5, threshold = d) for d in range(100) ] )
+  asset_1 = Asset(100, price_diff_generator([ -1, 0, 1]))
+  asset_2 = Asset(100, price_diff_generator([ -1, 0, 1, 2, 3]))
 
-  print(one_attempt([instrument_1, instrument_2], 30))
+  contract = Contract([DayInfo(1, 1.0), DayInfo(1, 1.0), DayInfo(1, 1.02)])
+
+  print(one_attempt(contract, [asset_1, asset_2], 3))
 
 def tests():
   test_process_day()
